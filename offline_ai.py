@@ -268,6 +268,17 @@ def process_basic_command(self, command):
         msg = "Procedurally generated a 3D Vase for you!"
         self.chat_history.append(f"<b>AI:</b> {msg}"); self.speak(msg)
         return
+    elif any(kw in command for kw in ["character", "humanoid", "person", "human", "wolf", "robot", "spider man", "reaper"]):
+        self.save_state()
+        mesh = generate_procedural_character(self, command)
+        name = f"Procedural_Character_{len(self.meshes)}"
+        self.meshes[name] = mesh
+        self.selected_mesh_name = name
+        self.reset_creative_sliders()
+        self.update_canvas()
+        msg = "Procedurally generated a 3D Character figure for you!"
+        self.chat_history.append(f"<b>AI:</b> {msg}"); self.speak(msg)
+        return
 
     # Procedural Math Art Creations Offline
     for math_type in ["mobius", "klein", "gyroid", "lorenz", "sierpinski", "dna", "wave", "ripple"]:
@@ -909,6 +920,14 @@ def get_shape_base_mesh(self, shape_type):
         return generate_procedural_mug(self)
     elif shape_type == "Vase":
         return generate_procedural_vase(self)
+    elif shape_type == "Pentagon Prism":
+        return trimesh.creation.cylinder(radius=20, height=40, sections=5)
+    elif shape_type == "Superellipsoid":
+        return generate_procedural_superellipsoid(self)
+    elif shape_type == "Trefoil Knot":
+        return generate_procedural_trefoil_knot(self)
+    elif shape_type == "Saddle Surface":
+        return generate_procedural_saddle(self)
     return None
 
 def apply_embedded_aesthetics(self, command):
@@ -1270,4 +1289,245 @@ def generate_procedural_heart(self, size=25, thickness=8, slices=40):
     mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
     mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi/2, [1,0,0]))
     mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
+    return mesh
+
+def generate_procedural_character(self, prompt="humanoid"):
+    """Procedurally generates a 3D character mesh assembly (humanoid, wolf, grim reaper, etc.) matching keywords."""
+    cmd = prompt.lower()
+    parts = []
+
+    # 1. Torso
+    torso = trimesh.creation.cylinder(radius=10, height=25)
+    torso.apply_translation([0, 0, 12.5])
+    parts.append(torso)
+
+    # 2. Neck
+    neck = trimesh.creation.cylinder(radius=3, height=4)
+    neck.apply_translation([0, 0, 25 + 2])
+    parts.append(neck)
+
+    # 3. Head
+    head = trimesh.creation.icosphere(radius=7)
+    head.apply_translation([0, 0, 27 + 7])
+    parts.append(head)
+
+    # 4. Shoulders
+    l_shoulder = trimesh.creation.icosphere(radius=3.5)
+    l_shoulder.apply_translation([-12, 0, 23])
+    r_shoulder = trimesh.creation.icosphere(radius=3.5)
+    r_shoulder.apply_translation([12, 0, 23])
+    parts.append(l_shoulder)
+    parts.append(r_shoulder)
+
+    # 5. Arms
+    # Left Arm
+    l_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+    l_arm.apply_translation([0, 0, -9])
+    l_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [0, 1, 0]))
+    l_arm.apply_translation([-12, 0, 23])
+    parts.append(l_arm)
+
+    # Right Arm
+    r_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+    r_arm.apply_translation([0, 0, -9])
+    if "scythe" in cmd or "weapon" in cmd or "sword" in cmd or "staff" in cmd:
+        r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-60), [1, 0, 0]))
+    else:
+        r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-15), [0, 1, 0]))
+    r_arm.apply_translation([12, 0, 23])
+    parts.append(r_arm)
+
+    # 6. Legs
+    # Left Leg
+    l_leg = trimesh.creation.cylinder(radius=3, height=22)
+    l_leg.apply_translation([0, 0, -11])
+    l_leg.apply_translation([-5, 0, 0])
+    parts.append(l_leg)
+
+    # Right Leg
+    r_leg = trimesh.creation.cylinder(radius=3, height=22)
+    r_leg.apply_translation([0, 0, -11])
+    r_leg.apply_translation([5, 0, 0])
+    parts.append(r_leg)
+
+    # 7. Snout & Ears (Wolf / Dog keywords)
+    if "wolf" in cmd or "dog" in cmd or "beast" in cmd or "animal" in cmd:
+        snout = trimesh.creation.cone(radius=2.2, height=6)
+        snout.apply_transform(trimesh.transformations.rotation_matrix(np.radians(90), [1, 0, 0]))
+        snout.apply_translation([0, 7, 33])
+        parts.append(snout)
+
+        l_ear = trimesh.creation.cone(radius=1.5, height=5, sections=4)
+        l_ear.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-10), [0, 1, 0]))
+        l_ear.apply_translation([-3, 0, 39])
+        r_ear = trimesh.creation.cone(radius=1.5, height=5, sections=4)
+        r_ear.apply_transform(trimesh.transformations.rotation_matrix(np.radians(10), [0, 1, 0]))
+        r_ear.apply_translation([3, 0, 39])
+        parts.append(l_ear)
+        parts.append(r_ear)
+
+    # 8. Cape / Cloak / Robe (Cloak / Robe / Reaper keywords)
+    if "cloak" in cmd or "robe" in cmd or "cape" in cmd or "reaper" in cmd or "hood" in cmd:
+        cloak = trimesh.creation.box(extents=[24, 6, 38])
+        cloak.apply_translation([0, -7, 14])
+        hood = trimesh.creation.icosphere(radius=8.5)
+        hood.apply_translation([0, -1.5, 34])
+        parts.append(cloak)
+        parts.append(hood)
+
+    # 9. Scythe / Sword / Weapon
+    if "scythe" in cmd or "reaper" in cmd:
+        shaft = trimesh.creation.cylinder(radius=1.0, height=50)
+        shaft.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [1, 0, 0]))
+        blade = trimesh.creation.box(extents=[22, 1.2, 5])
+        blade.apply_translation([-11, 0, 23])
+        blade.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [0, 1, 0]))
+        
+        scythe = trimesh.util.concatenate([shaft, blade])
+        scythe.apply_translation([13, 10, 15])
+        parts.append(scythe)
+    elif "sword" in cmd or "weapon" in cmd:
+        blade = trimesh.creation.box(extents=[2, 0.8, 30])
+        blade.apply_translation([0, 0, 15])
+        hilt = trimesh.creation.box(extents=[8, 1.5, 1.5])
+        hilt.apply_translation([0, 0, 0])
+        handle = trimesh.creation.cylinder(radius=0.8, height=8)
+        handle.apply_translation([0, 0, -4])
+        
+        sword = trimesh.util.concatenate([blade, hilt, handle])
+        sword.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
+        sword.apply_translation([13, 10, 12])
+        parts.append(sword)
+
+    composite = trimesh.util.concatenate(parts)
+    composite.apply_translation([0, 0, -composite.bounds[0][2]])
+    return composite
+
+def generate_procedural_trefoil_knot(self, r_tube=2.0, scale=10.0, slices=100):
+    """Procedurally generates a Trefoil Knot mesh by sweep-tubing a parametric curve."""
+    t = np.linspace(0, 2*np.pi, slices)
+    sub_meshes = []
+    for i in range(slices):
+        t_val = t[i]
+        x = scale * (np.sin(t_val) + 2 * np.sin(2 * t_val)) / 3.0
+        y = scale * (np.cos(t_val) - 2 * np.cos(2 * t_val)) / 3.0
+        z = scale * (-np.sin(3 * t_val)) / 3.0
+        
+        sphere = trimesh.creation.icosphere(radius=r_tube).apply_translation([x, y, z])
+        sub_meshes.append(sphere)
+        
+        t_next = t[(i + 1) % slices]
+        xn = scale * (np.sin(t_next) + 2 * np.sin(2 * t_next)) / 3.0
+        yn = scale * (np.cos(t_next) - 2 * np.cos(2 * t_next)) / 3.0
+        zn = scale * (-np.sin(3 * t_next)) / 3.0
+        
+        p0 = np.array([x, y, z])
+        p1 = np.array([xn, yn, zn])
+        direction = p1 - p0
+        length = np.linalg.norm(direction)
+        if length > 1e-5:
+            cylinder = trimesh.creation.cylinder(radius=r_tube * 0.9, height=length)
+            z_axis = [0, 0, 1]
+            axis = np.cross(z_axis, direction / length)
+            axis_len = np.linalg.norm(axis)
+            cylinder.apply_translation([0, 0, length / 2.0])
+            if axis_len > 1e-5:
+                angle = np.arccos(np.dot(z_axis, direction / length))
+                cylinder.apply_transform(trimesh.transformations.rotation_matrix(angle, axis / axis_len))
+            cylinder.apply_translation(p0)
+            sub_meshes.append(cylinder)
+            
+    return trimesh.util.concatenate(sub_meshes)
+
+def generate_procedural_saddle(self, size=40, height=15):
+    """Procedurally generates a Hyperbolic Paraboloid (saddle shape) with custom thickness."""
+    grid_res = 30
+    u = np.linspace(-size/2, size/2, grid_res)
+    v = np.linspace(-size/2, size/2, grid_res)
+    U, V = np.meshgrid(u, v)
+    U = U.flatten()
+    V = V.flatten()
+    
+    Z = height * ((U / (size/2))**2 - (V / (size/2))**2)
+    
+    vertices = []
+    faces = []
+    
+    for i in range(len(U)):
+        vertices.append([U[i], V[i], Z[i]])
+        
+    z_bottom = -height - 2
+    for i in range(len(U)):
+        vertices.append([U[i], V[i], z_bottom])
+        
+    n_pts = len(U)
+    for i in range(grid_res - 1):
+        for j in range(grid_res - 1):
+            idx = i * grid_res + j
+            faces.append([idx, idx + 1, idx + grid_res])
+            faces.append([idx + 1, idx + grid_res + 1, idx + grid_res])
+            
+            idx_b = idx + n_pts
+            faces.append([idx_b, idx_b + grid_res, idx_b + 1])
+            faces.append([idx_b + 1, idx_b + grid_res, idx_b + grid_res + 1])
+            
+    for i in range(grid_res - 1):
+        idx = i * grid_res
+        idx_b = idx + n_pts
+        faces.append([idx, idx + grid_res, idx_b])
+        faces.append([idx_b, idx + grid_res, idx + grid_res + n_pts])
+        
+    for i in range(grid_res - 1):
+        idx = i * grid_res + (grid_res - 1)
+        idx_b = idx + n_pts
+        faces.append([idx, idx_b, idx + grid_res])
+        faces.append([idx_b, idx + grid_res + n_pts, idx + grid_res])
+        
+    for j in range(grid_res - 1):
+        idx = j
+        idx_b = idx + n_pts
+        faces.append([idx, idx_b, idx + 1])
+        faces.append([idx_b, idx_b + 1, idx + 1])
+        
+    for j in range(grid_res - 1):
+        idx = (grid_res - 1) * grid_res + j
+        idx_b = idx + n_pts
+        faces.append([idx, idx + 1, idx_b])
+        faces.append([idx_b, idx + 1, idx_b + 1])
+        
+    mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
+    return mesh
+
+def generate_procedural_superellipsoid(self, size=20, n1=0.5, n2=1.5, res=30):
+    """Procedurally generates a Superellipsoid with shape parameters n1, n2."""
+    eta = np.linspace(-np.pi/2, np.pi/2, res)
+    omega = np.linspace(-np.pi, np.pi, res)
+    
+    vertices = []
+    for e in eta:
+        for w in omega:
+            ce = np.cos(e)
+            se = np.sin(e)
+            cw = np.cos(w)
+            sw = np.sin(w)
+            
+            x = np.sign(ce) * (abs(ce)**n1) * np.sign(cw) * (abs(cw)**n2) * size
+            y = np.sign(ce) * (abs(ce)**n1) * np.sign(sw) * (abs(sw)**n2) * size
+            z = np.sign(se) * (abs(se)**n1) * size
+            vertices.append([x, y, z])
+            
+    faces = []
+    for i in range(res - 1):
+        for j in range(res):
+            idx = i * res + j
+            idx_next_row = (i + 1) * res + j
+            idx_right = i * res + (j + 1) % res
+            idx_next_row_right = (i + 1) * res + (j + 1) % res
+            
+            faces.append([idx, idx_right, idx_next_row])
+            faces.append([idx_right, idx_next_row_right, idx_next_row])
+            
+    mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
+    mesh.merge_vertices()
+    mesh.remove_degenerate_faces()
     return mesh
