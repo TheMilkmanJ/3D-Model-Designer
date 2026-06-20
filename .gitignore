@@ -1,0 +1,10 @@
+build/
+dist/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+error_log.txt
+error_log_path.txt
+*.spec
