@@ -1294,13 +1294,30 @@ def generate_procedural_heart(self, size=25, thickness=8, slices=40):
     return mesh
 
 def generate_procedural_character(self, prompt="humanoid"):
-    """Procedurally generates a 3D character mesh assembly (humanoid, wolf, grim reaper, etc.) matching keywords."""
+    """Procedurally generates a 3D character mesh assembly matching keywords and pose request."""
     cmd = prompt.lower()
     parts = []
 
+    is_robot = "robot" in cmd or "mech" in cmd or "cyborg" in cmd
+    is_spiderman = "spider" in cmd or "spiderman" in cmd
+    
+    # Pose Detection
+    is_swinging = "swing" in cmd
+    is_hero = "hero" in cmd or "battle" in cmd or "action" in cmd or "pose" in cmd
+    is_running = "run" in cmd or "jog" in cmd
+    is_sitting = "sit" in cmd
+    is_jumping = "jump" in cmd or "leap" in cmd
+
     # 1. Torso
-    torso = trimesh.creation.cylinder(radius=10, height=25)
+    if is_robot:
+        torso = trimesh.creation.box(extents=[16, 12, 25])
+    else:
+        torso = trimesh.creation.cylinder(radius=10, height=25)
     torso.apply_translation([0, 0, 12.5])
+    
+    if is_running or is_swinging:
+        torso.apply_transform(trimesh.transformations.rotation_matrix(np.radians(10), [0, 1, 0]))
+        
     parts.append(torso)
 
     # 2. Neck
@@ -1309,7 +1326,10 @@ def generate_procedural_character(self, prompt="humanoid"):
     parts.append(neck)
 
     # 3. Head
-    head = trimesh.creation.icosphere(radius=7)
+    if is_robot:
+        head = trimesh.creation.box(extents=[11, 10, 10])
+    else:
+        head = trimesh.creation.icosphere(radius=7)
     head.apply_translation([0, 0, 27 + 7])
     parts.append(head)
 
@@ -1321,54 +1341,221 @@ def generate_procedural_character(self, prompt="humanoid"):
     parts.append(l_shoulder)
     parts.append(r_shoulder)
 
-    # 5. Arms
-    # Left Arm
-    l_arm = trimesh.creation.cylinder(radius=2.5, height=18)
-    l_arm.apply_translation([0, 0, -9])
-    l_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [0, 1, 0]))
-    l_arm.apply_translation([-12, 0, 23])
-    parts.append(l_arm)
+    # 5. Arms & Legs placement based on pose
+    if is_swinging:
+        # Right arm: extended up-forward at 45 degrees holding a web
+        r_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        r_arm.apply_translation([0, 0, -9])
+        r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
+        r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(30), [0, 1, 0]))
+        r_arm.apply_translation([12, 0, 23])
+        parts.append(r_arm)
 
-    # Right Arm
-    r_arm = trimesh.creation.cylinder(radius=2.5, height=18)
-    r_arm.apply_translation([0, 0, -9])
-    if "scythe" in cmd or "weapon" in cmd or "sword" in cmd or "staff" in cmd:
-        r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-60), [1, 0, 0]))
+        # Left arm: trailing back-down
+        l_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        l_arm.apply_translation([0, 0, -9])
+        l_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(45), [1, 0, 0]))
+        l_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-30), [0, 1, 0]))
+        l_arm.apply_translation([-12, 0, 23])
+        parts.append(l_arm)
+
+        # Left leg: bent forward/up
+        l_leg = trimesh.creation.cylinder(radius=3, height=22)
+        l_leg.apply_translation([0, 0, -11])
+        l_leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
+        l_leg.apply_translation([-5, 0, 0])
+        parts.append(l_leg)
+
+        # Right leg: extended back
+        r_leg = trimesh.creation.cylinder(radius=3, height=22)
+        r_leg.apply_translation([0, 0, -11])
+        r_leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(20), [1, 0, 0]))
+        r_leg.apply_translation([5, 0, 0])
+        parts.append(r_leg)
+
+        # Web line: thin long cylinder
+        web = trimesh.creation.cylinder(radius=0.4, height=100)
+        web.apply_translation([0, 0, 50])
+        web.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
+        web.apply_transform(trimesh.transformations.rotation_matrix(np.radians(30), [0, 1, 0]))
+        web.apply_translation([16, 12, 33])
+        parts.append(web)
+
+    elif is_hero:
+        # Left arm: bent at elbow, hand on hip
+        l_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        l_arm.apply_translation([0, 0, -9])
+        l_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(45), [0, 1, 0]))
+        l_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(30), [1, 0, 0]))
+        l_arm.apply_translation([-12, 0, 23])
+        parts.append(l_arm)
+
+        # Right arm: raised high or punching forward
+        r_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        r_arm.apply_translation([0, 0, -9])
+        r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-110), [0, 1, 0]))
+        r_arm.apply_translation([12, 0, 23])
+        parts.append(r_arm)
+
+        # Legs spread wide in hero stance
+        l_leg = trimesh.creation.cylinder(radius=3, height=22)
+        l_leg.apply_translation([0, 0, -11])
+        l_leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-20), [0, 1, 0]))
+        l_leg.apply_translation([-5, 0, 0])
+        parts.append(l_leg)
+
+        r_leg = trimesh.creation.cylinder(radius=3, height=22)
+        r_leg.apply_translation([0, 0, -11])
+        r_leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(20), [0, 1, 0]))
+        r_leg.apply_translation([5, 0, 0])
+        parts.append(r_leg)
+
+    elif is_running:
+        l_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        l_arm.apply_translation([0, 0, -9])
+        l_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
+        l_arm.apply_translation([-12, 0, 23])
+        parts.append(l_arm)
+
+        r_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        r_arm.apply_translation([0, 0, -9])
+        r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(45), [1, 0, 0]))
+        r_arm.apply_translation([12, 0, 23])
+        parts.append(r_arm)
+
+        l_leg = trimesh.creation.cylinder(radius=3, height=22)
+        l_leg.apply_translation([0, 0, -11])
+        l_leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(35), [1, 0, 0]))
+        l_leg.apply_translation([-5, 0, 0])
+        parts.append(l_leg)
+
+        r_leg = trimesh.creation.cylinder(radius=3, height=22)
+        r_leg.apply_translation([0, 0, -11])
+        r_leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-35), [1, 0, 0]))
+        r_leg.apply_translation([5, 0, 0])
+        parts.append(r_leg)
+
+    elif is_sitting:
+        l_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        l_arm.apply_translation([0, 0, -9])
+        l_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-30), [1, 0, 0]))
+        l_arm.apply_translation([-12, 0, 23])
+        parts.append(l_arm)
+
+        r_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        r_arm.apply_translation([0, 0, -9])
+        r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-30), [1, 0, 0]))
+        r_arm.apply_translation([12, 0, 23])
+        parts.append(r_arm)
+
+        l_leg = trimesh.creation.cylinder(radius=3, height=22)
+        l_leg.apply_translation([0, 0, -11])
+        l_leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-90), [1, 0, 0]))
+        l_leg.apply_translation([-5, -3, -5])
+        parts.append(l_leg)
+
+        r_leg = trimesh.creation.cylinder(radius=3, height=22)
+        r_leg.apply_translation([0, 0, -11])
+        r_leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-90), [1, 0, 0]))
+        r_leg.apply_translation([5, -3, -5])
+        parts.append(r_leg)
+
+    elif is_jumping:
+        l_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        l_arm.apply_translation([0, 0, -9])
+        l_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(110), [0, 1, 0]))
+        l_arm.apply_translation([-12, 0, 23])
+        parts.append(l_arm)
+
+        r_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        r_arm.apply_translation([0, 0, -9])
+        r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-110), [0, 1, 0]))
+        r_arm.apply_translation([12, 0, 23])
+        parts.append(r_arm)
+
+        l_leg = trimesh.creation.cylinder(radius=3, height=22)
+        l_leg.apply_translation([0, 0, -11])
+        l_leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(45), [1, 0, 0]))
+        l_leg.apply_translation([-5, 0, 0])
+        parts.append(l_leg)
+
+        r_leg = trimesh.creation.cylinder(radius=3, height=22)
+        r_leg.apply_translation([0, 0, -11])
+        r_leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(45), [1, 0, 0]))
+        r_leg.apply_translation([5, 0, 0])
+        parts.append(r_leg)
+
     else:
-        r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-15), [0, 1, 0]))
-    r_arm.apply_translation([12, 0, 23])
-    parts.append(r_arm)
+        l_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        l_arm.apply_translation([0, 0, -9])
+        l_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [0, 1, 0]))
+        l_arm.apply_translation([-12, 0, 23])
+        parts.append(l_arm)
 
-    # 6. Legs
-    # Left Leg
-    l_leg = trimesh.creation.cylinder(radius=3, height=22)
-    l_leg.apply_translation([0, 0, -11])
-    l_leg.apply_translation([-5, 0, 0])
-    parts.append(l_leg)
+        r_arm = trimesh.creation.cylinder(radius=2.5, height=18)
+        r_arm.apply_translation([0, 0, -9])
+        if "scythe" in cmd or "weapon" in cmd or "sword" in cmd or "staff" in cmd:
+            r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-60), [1, 0, 0]))
+        else:
+            r_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-15), [0, 1, 0]))
+        r_arm.apply_translation([12, 0, 23])
+        parts.append(r_arm)
 
-    # Right Leg
-    r_leg = trimesh.creation.cylinder(radius=3, height=22)
-    r_leg.apply_translation([0, 0, -11])
-    r_leg.apply_translation([5, 0, 0])
-    parts.append(r_leg)
+        l_leg = trimesh.creation.cylinder(radius=3, height=22)
+        l_leg.apply_translation([0, 0, -11])
+        l_leg.apply_translation([-5, 0, 0])
+        parts.append(l_leg)
 
-    # 7. Snout & Ears (Wolf / Dog keywords)
-    if "wolf" in cmd or "dog" in cmd or "beast" in cmd or "animal" in cmd:
-        snout = trimesh.creation.cone(radius=2.2, height=6)
-        snout.apply_transform(trimesh.transformations.rotation_matrix(np.radians(90), [1, 0, 0]))
-        snout.apply_translation([0, 7, 33])
-        parts.append(snout)
+        r_leg = trimesh.creation.cylinder(radius=3, height=22)
+        r_leg.apply_translation([0, 0, -11])
+        r_leg.apply_translation([5, 0, 0])
+        parts.append(r_leg)
 
-        l_ear = trimesh.creation.cone(radius=1.5, height=5, sections=4)
-        l_ear.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-10), [0, 1, 0]))
-        l_ear.apply_translation([-3, 0, 39])
-        r_ear = trimesh.creation.cone(radius=1.5, height=5, sections=4)
-        r_ear.apply_transform(trimesh.transformations.rotation_matrix(np.radians(10), [0, 1, 0]))
-        r_ear.apply_translation([3, 0, 39])
-        parts.append(l_ear)
-        parts.append(r_ear)
+    # 6. Spiderman Details (Chest Logo & Web-shooters)
+    if is_spiderman:
+        logo_core = trimesh.creation.icosphere(radius=1.8).apply_translation([0, 10, 16])
+        parts.append(logo_core)
+        for side in [-1, 1]:
+            for offset_angle in [-25, -10, 10, 25]:
+                leg = trimesh.creation.cylinder(radius=0.3, height=6)
+                leg.apply_translation([0, 0, 3])
+                leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(offset_angle), [0, 1, 0]))
+                leg.apply_transform(trimesh.transformations.rotation_matrix(np.radians(side * 40), [1, 0, 0]))
+                leg.apply_translation([side * 3, 10, 16])
+                parts.append(leg)
 
-    # 8. Cape / Cloak / Robe (Cloak / Robe / Reaper keywords)
+        l_wrist_shooter = trimesh.creation.cylinder(radius=1.2, height=3).apply_translation([-12, 0, 14])
+        r_wrist_shooter = trimesh.creation.cylinder(radius=1.2, height=3).apply_translation([12, 0, 14])
+        parts.append(l_wrist_shooter)
+        parts.append(r_wrist_shooter)
+
+    # 7. Robot Details (Antenna)
+    if is_robot:
+        antenna = trimesh.creation.cylinder(radius=0.5, height=7)
+        antenna.apply_translation([0, 0, 39])
+        antenna_tip = trimesh.creation.icosphere(radius=1.5)
+        antenna_tip.apply_translation([0, 0, 42.5])
+        parts.append(antenna)
+        parts.append(antenna_tip)
+
+    # 8. Snout & Ears (Wolf / Dog keywords)
+    if "wolf" in cmd or "dog" in cmd or "beast" in cmd or "animal" in cmd or "reaper" in cmd:
+        if "wolf" in cmd or "dog" in cmd or "beast" in cmd or "animal" in cmd:
+            snout = trimesh.creation.cone(radius=2.2, height=6)
+            snout.apply_transform(trimesh.transformations.rotation_matrix(np.radians(90), [1, 0, 0]))
+            snout.apply_translation([0, 7, 33])
+            parts.append(snout)
+
+            l_ear = trimesh.creation.cone(radius=1.5, height=5, sections=4)
+            l_ear.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-10), [0, 1, 0]))
+            l_ear.apply_translation([-3, 0, 39])
+            r_ear = trimesh.creation.cone(radius=1.5, height=5, sections=4)
+            r_ear.apply_transform(trimesh.transformations.rotation_matrix(np.radians(10), [0, 1, 0]))
+            r_ear.apply_translation([3, 0, 39])
+            parts.append(l_ear)
+            parts.append(r_ear)
+
+    # 9. Cape / Cloak / Robe (Cloak / Robe / Reaper keywords)
     if "cloak" in cmd or "robe" in cmd or "cape" in cmd or "reaper" in cmd or "hood" in cmd:
         cloak = trimesh.creation.box(extents=[24, 6, 38])
         cloak.apply_translation([0, -7, 14])
@@ -1377,7 +1564,7 @@ def generate_procedural_character(self, prompt="humanoid"):
         parts.append(cloak)
         parts.append(hood)
 
-    # 9. Scythe / Sword / Weapon
+    # 10. Scythe / Sword / Weapon
     if "scythe" in cmd or "reaper" in cmd:
         shaft = trimesh.creation.cylinder(radius=1.0, height=50)
         shaft.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [1, 0, 0]))

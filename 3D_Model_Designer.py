@@ -330,6 +330,7 @@ class AI3DModeler(QtWidgets.QMainWindow):
 
         # State management for meshes and UI
         self.meshes = {}  # Dictionary to store trimesh objects: {name: trimesh_obj}
+        self.base_meshes = {}  # Dictionary to store untextured base meshes to prevent compound texturing issues
         self.selected_mesh_name = None
         self.current_colors = [QtGui.QColor("white"), QtGui.QColor("cyan")]
         self.density_level = 1  # Default subdivision level
@@ -384,15 +385,15 @@ class AI3DModeler(QtWidgets.QMainWindow):
         self.is_dragging = False
         self.snap_to_grid = True # Professional precision default
         self.drag_start_world = None
-        self.plotter.iren.add_observer("LeftButtonPressEvent", self._on_drag_start)
-        self.plotter.iren.add_observer("MouseMoveEvent", self._on_drag_move)
-        self.plotter.iren.add_observer("LeftButtonReleaseEvent", self._on_drag_end)
+        self.plotter.iren.add_observer("LeftButtonPressEvent", self._on_drag_start, 10)
+        self.plotter.iren.add_observer("MouseMoveEvent", self._on_drag_move, 10)
+        self.plotter.iren.add_observer("LeftButtonReleaseEvent", self._on_drag_end, 10)
 
         # NEW: Direct Rotate Support via Shift + Right Click
         self.is_rotating = False
         self.rotate_start_pos = None
-        self.plotter.iren.add_observer("RightButtonPressEvent", self._on_rotate_start)
-        self.plotter.iren.add_observer("RightButtonReleaseEvent", self._on_rotate_end)
+        self.plotter.iren.add_observer("RightButtonPressEvent", self._on_rotate_start, 10)
+        self.plotter.iren.add_observer("RightButtonReleaseEvent", self._on_rotate_end, 10)
 
         # 2. Scene Management, Creative Mode & Art Palette (Right Sidebar using Tabs)
         self.sidebar_tabs = QtWidgets.QTabWidget()
@@ -1651,7 +1652,7 @@ class AI3DModeler(QtWidgets.QMainWindow):
 
     def toggle_affine_widget(self, enabled):
         """Standard CAD gizmo for high-precision dragging/rotating."""
-        self.plotter.clear_widgets()
+        self.clear_widgets()
         self.widget_bound_mesh_name = None
         if enabled:
             if hasattr(self, 'box_widget_act'):
@@ -1660,12 +1661,14 @@ class AI3DModeler(QtWidgets.QMainWindow):
                 delattr(self, 'widget_start_mesh')
             self.refresh_widgets()
 
-    def save_state(self):
+    def save_state(self, is_texture=False):
         """Snapshots current scene for undo functionality."""
         snapshot = {name: mesh.copy() for name, mesh in self.meshes.items()}
         self.undo_stack.append(snapshot)
         self.redo_stack.clear() # New actions break the redo chain
         if len(self.undo_stack) > 20: self.undo_stack.pop(0)
+        if not is_texture:
+            self.base_meshes.clear()
 
     def undo(self):
         """Restores last saved scene state."""
@@ -1874,7 +1877,7 @@ class AI3DModeler(QtWidgets.QMainWindow):
 
     def toggle_transform_widget(self, enabled):
         """Enables/Disables interactive box handles for moving/scaling pieces."""
-        self.plotter.clear_widgets()
+        self.clear_widgets()
         self.widget_bound_mesh_name = None
         if enabled:
             if hasattr(self, 'gizmo_act'):
@@ -1944,6 +1947,19 @@ class AI3DModeler(QtWidgets.QMainWindow):
         self.widget_start_mesh = orig_mesh.copy()
         self.update_canvas()
 
+    def clear_widgets(self):
+        """Clears all active PyVista widgets (affine and box widgets)."""
+        if hasattr(self, 'active_affine_widget') and self.active_affine_widget:
+            try:
+                self.active_affine_widget.remove()
+            except Exception:
+                pass
+            self.active_affine_widget = None
+        try:
+            self.plotter.clear_box_widgets()
+        except Exception:
+            pass
+
     def refresh_widgets(self):
         """Recreates the active widget for the currently selected mesh if it changed."""
         if not hasattr(self, 'gizmo_act') or not hasattr(self, 'box_widget_act'):
@@ -1955,7 +1971,7 @@ class AI3DModeler(QtWidgets.QMainWindow):
         if self.selected_mesh_name == self.widget_bound_mesh_name:
             return
             
-        self.plotter.clear_widgets()
+        self.clear_widgets()
         self.widget_bound_mesh_name = self.selected_mesh_name
         
         if not self.selected_mesh_name:
@@ -1965,7 +1981,7 @@ class AI3DModeler(QtWidgets.QMainWindow):
             actor = self.plotter.renderer.actors.get(self.selected_mesh_name)
             if actor: 
                 self.widget_start_mesh = self.meshes[self.selected_mesh_name].copy()
-                self.plotter.add_affine_transform_widget(actor, release_callback=self.apply_affine_transform)
+                self.active_affine_widget = self.plotter.add_affine_transform_widget(actor, release_callback=self.apply_affine_transform)
         elif self.box_widget_act.isChecked():
             self.widget_start_mesh = self.meshes[self.selected_mesh_name].copy()
             mesh = self.meshes[self.selected_mesh_name]
@@ -3513,7 +3529,12 @@ class AI3DModeler(QtWidgets.QMainWindow):
     def _displace_mesh(self, func):
         """Helper to modify vertices and refresh view."""
         if not self.selected_mesh_name: return
-        mesh = self.meshes[self.selected_mesh_name]
+        self.save_state(is_texture=True)
+        
+        if self.selected_mesh_name not in self.base_meshes:
+            self.base_meshes[self.selected_mesh_name] = self.meshes[self.selected_mesh_name].copy()
+            
+        mesh = self.base_meshes[self.selected_mesh_name].copy()
         
         # Use the density slider to determine how much to subdivide before texturing
         for _ in range(self.density_level):
