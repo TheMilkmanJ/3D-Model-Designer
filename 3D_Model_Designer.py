@@ -174,7 +174,148 @@ try:
 except ImportError:
     pass
 
+# Try to import google-generativeai for PyInstaller detection
+try:
+    import google.generativeai as genai
+except ImportError:
+    pass
+
+import json
+import re
+import traceback
+
+class GeminiSynthesisThread(QtCore.QThread):
+    def __init__(self, prompt, parent=None):
+        super().__init__(parent)
+        self.prompt = prompt
+        self.parent_obj = parent
+
+    def run(self):
+        # 1. Check API Key
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            self.parent_obj.synthesis_offline.emit(self.prompt)
+            return
+
+        self.parent_obj.synthesis_status.emit("Thinking... 🧠", "magenta")
+        self.parent_obj.synthesis_log.emit("<b>AI:</b> Contacting Google Gemini for shape synthesis...")
+
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+        except ImportError:
+            # Install dynamically
+            self.parent_obj.synthesis_status.emit("Installing package... 📦", "#feca57")
+            self.parent_obj.synthesis_log.emit("<b>AI:</b> Installing required dependency google-generativeai...")
+            try:
+                import subprocess
+                import sys
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "google-generativeai"])
+                import google.generativeai as genai
+                genai.configure(api_key=api_key)
+            except Exception as e:
+                self.parent_obj.synthesis_error.emit(self.prompt, f"Failed to import/install google-generativeai: {e}", "")
+                return
+
+        system_instruction = (
+            "You are a professional 3D CAD modeling scriptwriter that generates trimesh python scripts.\n"
+            "Generate ONLY valid Python code containing trimesh geometry generation. Do not include any explanations, imports, markdown wrappers except the ```python ``` block.\n"
+            "Rules:\n"
+            "1. You must construct a single watertight trimesh.Trimesh or trimesh.parent.Geometry object and assign it to the variable named `mesh`.\n"
+            "2. Do not use complex boolean operations (union/difference/intersection) unless absolutely necessary, as they frequently fail if meshes are not perfectly manifold. Instead, prefer concatenating meshes using `trimesh.util.concatenate([mesh1, mesh2, ...])`.\n"
+            "3. You have pre-imported `trimesh` and `numpy as np`. Do not import them again.\n"
+            "4. Keep the design complex, structured, and visually interesting matching the user's description (e.g. humanoid with multiple segments, complex structure, limbs, weapons, pose, wings, etc.). Assemble multiple primitive shapes (spheres, boxes, cylinders, cones) using rotation and translation transformations.\n"
+            "5. To rotate or translate components, use `mesh.apply_transform(trimesh.transformations.rotation_matrix(angle_in_radians, axis_vector))` or `mesh.apply_translation(translation_vector)`.\n"
+            "6. Make sure there are no syntax errors or undefined variables.\n"
+            "7. The final result must be assigned to the variable `mesh`.\n\n"
+            "Example code to create a dumbbell:\n"
+            "```python\n"
+            "bar = trimesh.creation.cylinder(radius=1.5, height=30)\n"
+            "bar.apply_translation([0, 0, 15])\n"
+            "left_weight = trimesh.creation.cylinder(radius=8, height=4)\n"
+            "left_weight.apply_translation([0, 0, 2])\n"
+            "right_weight = trimesh.creation.cylinder(radius=8, height=4)\n"
+            "right_weight.apply_translation([0, 0, 28])\n"
+            "mesh = trimesh.util.concatenate([bar, left_weight, right_weight])\n"
+            "```"
+        )
+
+        model_name = "gemini-2.0-flash"  # Default model
+        
+        try:
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction=system_instruction
+            )
+        except Exception as e:
+            self.parent_obj.synthesis_error.emit(self.prompt, f"Failed to initialize Gemini Model: {e}", "")
+            return
+
+        chat = model.start_chat()
+        current_prompt = f"Write a python script to generate a 3D model for: '{self.prompt}'."
+        
+        code = ""
+        max_attempts = 3
+        attempt = 0
+        
+        while attempt < max_attempts:
+            attempt += 1
+            self.parent_obj.synthesis_status.emit(f"Synthesizing (Try {attempt}/{max_attempts})... 🛠️", "cyan")
+            try:
+                response = chat.send_message(current_prompt)
+                response_text = response.text
+                
+                code_match = re.search(r"```python\n(.*?)```", response_text, re.DOTALL)
+                if not code_match:
+                    code_match = re.search(r"```\n(.*?)```", response_text, re.DOTALL)
+                
+                code = code_match.group(1) if code_match else response_text
+                lines = code.split("\n")
+                filtered_lines = []
+                for line in lines:
+                    if line.strip().startswith("import trimesh") or line.strip().startswith("import numpy"):
+                        continue
+                    filtered_lines.append(line)
+                code = "\n".join(filtered_lines)
+                
+                self.parent_obj.synthesis_log.emit(f"<b>System:</b> Compiling synthesized CAD macro...")
+                local_vars = {'trimesh': trimesh, 'np': np, 'mesh': None}
+                
+                exec(code, {}, local_vars)
+                
+                generated_mesh = local_vars.get('mesh')
+                if generated_mesh is None:
+                    raise ValueError("Variable `mesh` was not defined or is None after executing script.")
+                
+                self.parent_obj.synthesis_status.emit("CAD Core Online!", "#39ff14")
+                self.parent_obj.synthesis_success.emit(self.prompt, generated_mesh, code)
+                return
+                
+            except Exception as ex:
+                err_type, err_val, err_tb = sys.exc_info()
+                tb_lines = traceback.format_exception(err_type, err_val, err_tb)
+                tb_str = "".join(tb_lines)
+                self.parent_obj.synthesis_log.emit(f"<span style='color: #ff4757;'><b>Error during execution:</b> {ex}</span>")
+                
+                if attempt == max_attempts:
+                    self.parent_obj.synthesis_status.emit("Error! ❌", "#ff4757")
+                    self.parent_obj.synthesis_error.emit(self.prompt, f"Failed after {max_attempts} attempts. Last error: {ex}", code)
+                    return
+                
+                current_prompt = (
+                    f"The script you generated encountered an error during execution:\n"
+                    f"```\n{tb_str}\n```\n"
+                    f"Please correct the code. Ensure that you fix the error and assign the output mesh to the `mesh` variable. "
+                    f"Return ONLY the corrected Python script inside a ```python ``` block."
+                )
+
 class AI3DModeler(QtWidgets.QMainWindow):
+    synthesis_success = QtCore.pyqtSignal(str, object, str)
+    synthesis_error = QtCore.pyqtSignal(str, str, str)
+    synthesis_status = QtCore.pyqtSignal(str, str)
+    synthesis_log = QtCore.pyqtSignal(str)
+    synthesis_offline = QtCore.pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AI-Assisted 3D Builder (3MF Support)")
@@ -205,6 +346,13 @@ class AI3DModeler(QtWidgets.QMainWindow):
         self.redo_stack = []
         self.init_pattern_registry()
         self.load_macros()
+
+        # Connect AI synthesis thread signals
+        self.synthesis_success.connect(self._handle_synthesis_success)
+        self.synthesis_error.connect(self._handle_synthesis_error)
+        self.synthesis_status.connect(self.set_ai_status)
+        self.synthesis_log.connect(self._log_ai_chat)
+        self.synthesis_offline.connect(self._handle_offline_fallback)
 
         # Main Layout Setup
         self.central_widget = QtWidgets.QWidget()
@@ -2961,386 +3109,63 @@ class AI3DModeler(QtWidgets.QMainWindow):
         self.ai_chat_history.append({"role": "User", "content": command})
         self.process_basic_command(command)
 
-    def generate_wolf_reaper_mesh(self):
-        """Generates a composite humanoid wolf wearing a grim reaper's cloak and wielding a scythe."""
-        import trimesh
-        import numpy as np
-        
-        # 1. Torso / Cloak body
-        cloak_body = trimesh.creation.cylinder(radius=15, height=50)
-        cloak_body.apply_translation([0, 0, 25])
-        
-        # 2. Grim Reaper Hood
-        hood = trimesh.creation.icosphere(radius=12)
-        hood.apply_translation([0, 0, 52])
-        
-        # 3. Wolf head components inside/around the hood
-        snout = trimesh.creation.box(extents=[8, 14, 8])
-        snout.apply_translation([0, 8, 54])
-        
-        left_ear = trimesh.creation.cone(radius=3, height=8)
-        left_ear.apply_translation([-5, 0, 62])
-        
-        right_ear = trimesh.creation.cone(radius=3, height=8)
-        right_ear.apply_translation([5, 0, 62])
-        
-        # 4. Arms
-        left_arm = trimesh.creation.cylinder(radius=4, height=25)
-        left_arm.apply_translation([0, 0, 12.5])
-        left_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
-        left_arm.apply_translation([-16, 8, 38])
-        
-        right_arm = trimesh.creation.cylinder(radius=4, height=25)
-        right_arm.apply_translation([0, 0, 12.5])
-        right_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-70), [1, 0, 0]))
-        right_arm.apply_translation([16, 12, 38])
-        
-        # 5. Scythe (Handle + Blade)
-        scythe_handle = trimesh.creation.cylinder(radius=1.5, height=80)
-        scythe_handle.apply_translation([16, 20, 40])
-        
-        scythe_blade = trimesh.creation.box(extents=[35, 3, 6])
-        scythe_blade.apply_translation([-10, 0, 0])
-        scythe_blade.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [0, 1, 0]))
-        scythe_blade.apply_translation([16, 20, 80])
-        
-        # 6. Concatenate components
-        mesh = trimesh.util.concatenate([
-            cloak_body, hood, snout, left_ear, right_ear,
-            left_arm, right_arm, scythe_handle, scythe_blade
-        ])
-        
-        # Subdivide slightly to smooth it and give it a premium sculpted look
-        vertices, faces = trimesh.remesh.subdivide(mesh.vertices, mesh.faces)
-        mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-        
-        return mesh
-
-    def generate_scythe_mesh(self):
-        import trimesh
-        import numpy as np
-        handle = trimesh.creation.cylinder(radius=1.5, height=80)
-        handle.apply_translation([0, 0, 40])
-        blade = trimesh.creation.box(extents=[35, 3, 6])
-        blade.apply_translation([-10, 0, 0])
-        blade.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [0, 1, 0]))
-        blade.apply_translation([0, 0, 80])
-        return trimesh.util.concatenate([handle, blade])
-
-    def generate_wolf_mesh(self):
-        import trimesh
-        import numpy as np
-        head = trimesh.creation.icosphere(radius=15)
-        snout = trimesh.creation.box(extents=[10, 16, 10])
-        snout.apply_translation([0, 10, 2])
-        left_ear = trimesh.creation.cone(radius=4, height=10)
-        left_ear.apply_translation([-6, 0, 12])
-        right_ear = trimesh.creation.cone(radius=4, height=10)
-        right_ear.apply_translation([6, 0, 12])
-        return trimesh.util.concatenate([head, snout, left_ear, right_ear])
-
-    def generate_reaper_mesh(self):
-        import trimesh
-        import numpy as np
-        body = trimesh.creation.cylinder(radius=15, height=50)
-        body.apply_translation([0, 0, 25])
-        hood = trimesh.creation.icosphere(radius=12)
-        hood.apply_translation([0, 0, 52])
-        return trimesh.util.concatenate([body, hood])
-
     def generate_complex_procedural_mesh(self, prompt):
-        """Dynamic anatomy and accessory synthesizer to generate complex organic shapes based on prompt keywords."""
+        """Simple clean fallback to generate primitive shapes when offline."""
         import trimesh
         import numpy as np
         
-        p_lower = prompt.lower()
-        components = []
-        
-        # 1. Subject extraction
-        is_spider = "spider" in p_lower and not ("spider-man" in p_lower or "spiderman" in p_lower)
-        is_insect = any(w in p_lower for w in ["insect", "bug", "ant", "beetle", "scorpion"])
-        is_quadruped = any(w in p_lower for w in ["wolf", "dog", "quadruped", "lion", "cat", "horse", "dragon", "beast", "creature"]) and not is_spider and not is_insect
-        is_humanoid = any(w in p_lower for w in ["human", "man", "humanoid", "robot", "reaper", "reapers", "cloak", "spiderman", "spider-man", "hero", "pose", "character", "knight", "soldier", "warrior", "suit", "armor"]) or not (is_spider or is_insect or is_quadruped)
-        
-        # Pose detection
-        is_hero_pose = any(w in p_lower for w in ["hero", "pose", "crouch", "dynamic", "action", "attacking", "fight", "spiderman", "spider-man"])
-        is_flying = any(w in p_lower for w in ["fly", "flying", "jump", "wings"])
-        
-        # Details & Themes
-        has_wolf_head = "wolf" in p_lower
-        has_robot_head = any(w in p_lower for w in ["robot", "cyborg", "cyber", "mech", "machine"])
-        has_cloak = any(w in p_lower for w in ["cloak", "robe", "hood", "reaper", "goth", "spooky"])
-        
-        # Weapons & Attachments
-        has_scythe = "scythe" in p_lower
-        has_sword = any(w in p_lower for w in ["sword", "blade", "weapon", "dagger", "saber"])
-        has_shield = "shield" in p_lower
-        has_wings = any(w in p_lower for w in ["wings", "wing", "angel", "demon", "fly"])
-        
-        # Torso and core layout
-        if is_humanoid:
-            # Torso / Upper body
-            if has_cloak:
-                # Large draped robe-like body
-                torso = trimesh.creation.cylinder(radius=15, height=50)
-                torso.apply_translation([0, 0, 25])
-                components.append(torso)
-            else:
-                # Styled humanoid chest and hip section
-                chest = trimesh.creation.icosphere(radius=12)
-                chest.apply_transform(np.diag([1.25, 0.85, 1.0, 1.0])) # wider chest
-                chest.apply_translation([0, 0, 35])
-                hips = trimesh.creation.cylinder(radius=8, height=12)
-                hips.apply_translation([0, 0, 20])
-                components.extend([chest, hips])
-                
-            # Head / Hood
-            if has_cloak:
-                hood = trimesh.creation.icosphere(radius=12)
-                hood.apply_translation([0, 0, 52])
-                components.append(hood)
-            else:
-                head = trimesh.creation.icosphere(radius=8)
-                head.apply_translation([0, 0, 48])
-                components.append(head)
-                
-            # Snout / Ears / Visors
-            if has_wolf_head:
-                snout = trimesh.creation.box(extents=[8, 14, 8])
-                snout.apply_translation([0, 8, 52] if has_cloak else [0, 8, 48])
-                left_ear = trimesh.creation.cone(radius=3, height=8)
-                left_ear.apply_translation([-5, 0, 60] if has_cloak else [-4, 0, 54])
-                right_ear = trimesh.creation.cone(radius=3, height=8)
-                right_ear.apply_translation([5, 0, 60] if has_cloak else [4, 0, 54])
-                components.extend([snout, left_ear, right_ear])
-            elif has_robot_head:
-                visor = trimesh.creation.box(extents=[10, 4, 3])
-                visor.apply_translation([0, 6, 48])
-                antenna = trimesh.creation.cylinder(radius=0.8, height=8)
-                antenna.apply_translation([0, 0, 54])
-                components.extend([visor, antenna])
-                
-            # Limbs (Legs & Arms)
-            if is_hero_pose:
-                # Crouching legs (dynamic hero pose)
-                left_thigh = trimesh.creation.cylinder(radius=3.5, height=18)
-                left_thigh.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-60), [1, 0, 0]))
-                left_thigh.apply_translation([-10, -6, 12])
-                
-                left_shin = trimesh.creation.cylinder(radius=2.8, height=18)
-                left_shin.apply_transform(trimesh.transformations.rotation_matrix(np.radians(60), [1, 0, 0]))
-                left_shin.apply_translation([-10, 4, 6])
-                
-                right_thigh = trimesh.creation.cylinder(radius=3.5, height=18)
-                right_thigh.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [0, 1, 0]))
-                right_thigh.apply_translation([8, 0, 12])
-                
-                right_shin = trimesh.creation.cylinder(radius=2.8, height=18)
-                right_shin.apply_translation([14, 0, 6])
-                
-                components.extend([left_thigh, left_shin, right_thigh, right_shin])
-                
-                # Dynamic action arms
-                left_arm = trimesh.creation.cylinder(radius=3, height=22)
-                left_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-30), [1, 0, 0]))
-                left_arm.apply_translation([-15, 4, 30])
-                
-                right_arm = trimesh.creation.cylinder(radius=3, height=22)
-                right_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(70), [1, 0, 0]))
-                right_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-30), [0, 0, 1]))
-                right_arm.apply_translation([15, 10, 36])
-                
-                components.extend([left_arm, right_arm])
-            else:
-                # Standard standing legs
-                if not has_cloak:
-                    left_leg = trimesh.creation.cylinder(radius=3.5, height=22)
-                    left_leg.apply_translation([-7, 0, 11])
-                    right_leg = trimesh.creation.cylinder(radius=3.5, height=22)
-                    right_leg.apply_translation([7, 0, 11])
-                    components.extend([left_leg, right_leg])
-                    
-                # Arms
-                left_arm = trimesh.creation.cylinder(radius=3, height=22)
-                left_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-15), [0, 1, 0]))
-                left_arm.apply_translation([-14, 0, 32])
-                
-                right_arm = trimesh.creation.cylinder(radius=3, height=22)
-                right_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [0, 1, 0]))
-                right_arm.apply_translation([14, 0, 32])
-                components.extend([left_arm, right_arm])
-                
-        elif is_quadruped:
-            # Horizontal quadruped body
-            body = trimesh.creation.cylinder(radius=10, height=45)
-            body.apply_transform(trimesh.transformations.rotation_matrix(np.radians(90), [1, 0, 0]))
-            body.apply_translation([0, 0, 22])
-            components.append(body)
-            
-            # Neck and Head
-            neck = trimesh.creation.cylinder(radius=5, height=18)
-            neck.apply_transform(trimesh.transformations.rotation_matrix(np.radians(35), [1, 0, 0]))
-            neck.apply_translation([0, 18, 28])
-            head = trimesh.creation.icosphere(radius=8)
-            head.apply_translation([0, 24, 38])
-            components.extend([neck, head])
-            
-            # Wolf snout & ears
-            if has_wolf_head or "dog" in p_lower or "quadruped" in p_lower:
-                snout = trimesh.creation.box(extents=[5, 10, 5])
-                snout.apply_translation([0, 31, 38])
-                left_ear = trimesh.creation.cone(radius=2, height=6)
-                left_ear.apply_translation([-3, 22, 45])
-                right_ear = trimesh.creation.cone(radius=2, height=6)
-                right_ear.apply_translation([3, 22, 45])
-                components.extend([snout, left_ear, right_ear])
-            elif "dragon" in p_lower:
-                left_horn = trimesh.creation.cone(radius=1.8, height=12)
-                left_horn.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
-                left_horn.apply_translation([-4, 18, 46])
-                right_horn = trimesh.creation.cone(radius=1.8, height=12)
-                right_horn.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
-                right_horn.apply_translation([4, 18, 46])
-                components.extend([left_horn, right_horn])
-                
-            # 4 Legs
-            leg_h = 18
-            leg_r = 2.5
-            fl = trimesh.creation.cylinder(radius=leg_r, height=leg_h)
-            fl.apply_translation([-8, 16, 9])
-            fr = trimesh.creation.cylinder(radius=leg_r, height=leg_h)
-            fr.apply_translation([8, 16, 9])
-            bl = trimesh.creation.cylinder(radius=leg_r, height=leg_h)
-            bl.apply_translation([-8, -16, 9])
-            br = trimesh.creation.cylinder(radius=leg_r, height=leg_h)
-            br.apply_translation([8, -16, 9])
-            components.extend([fl, fr, bl, br])
-            
-            # Tail
-            tail = trimesh.creation.cylinder(radius=1.8, height=20)
-            tail.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
-            tail.apply_translation([0, -28, 18])
-            components.append(tail)
-            
-        elif is_spider or is_insect:
-            # Segmented body segments
-            head = trimesh.creation.icosphere(radius=8)
-            head.apply_translation([0, 16, 12])
-            thorax = trimesh.creation.icosphere(radius=10)
-            thorax.apply_translation([0, 2, 10])
-            abdomen = trimesh.creation.icosphere(radius=14)
-            abdomen.apply_transform(np.diag([1.0, 1.4, 1.0, 1.0]))
-            abdomen.apply_translation([0, -16, 12])
-            components.extend([head, thorax, abdomen])
-            
-            # Legs (8 for spider, 6 for insect)
-            leg_count = 8 if is_spider else 6
-            for i in range(leg_count):
-                side = 1 if (i % 2 == 0) else -1
-                pair_idx = i // 2
-                
-                angle_y = np.radians(side * (45 - pair_idx * 25))
-                leg_joint = trimesh.creation.cylinder(radius=1.5, height=18)
-                leg_joint.apply_transform(trimesh.transformations.rotation_matrix(np.radians(60), [0, 1, 0]))
-                leg_joint.apply_transform(trimesh.transformations.rotation_matrix(angle_y, [0, 0, 1]))
-                leg_joint.apply_translation([side * 8, (pair_idx - 1.5) * 8, 14])
-                
-                leg_tip = trimesh.creation.cylinder(radius=1.0, height=22)
-                leg_tip.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [0, 1, 0]))
-                leg_tip.apply_transform(trimesh.transformations.rotation_matrix(angle_y, [0, 0, 1]))
-                leg_tip.apply_translation([side * 18, (pair_idx - 1.5) * 8, 4])
-                
-                components.extend([leg_joint, leg_tip])
-                
-        # 3. Weapons & Shields placement
-        hand_pos = [15, 12, 36] if (is_humanoid and is_hero_pose) else [14, 0, 24]
-        
-        if has_scythe:
-            scythe_handle = trimesh.creation.cylinder(radius=1.5, height=80)
-            scythe_handle.apply_translation(hand_pos)
-            
-            scythe_blade = trimesh.creation.box(extents=[35, 3, 6])
-            scythe_blade.apply_translation([-10, 0, 0])
-            scythe_blade.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [0, 1, 0]))
-            scythe_blade.apply_translation([hand_pos[0], hand_pos[1], hand_pos[2] + 40])
-            components.extend([scythe_handle, scythe_blade])
-            
-        elif has_sword:
-            sword_handle = trimesh.creation.cylinder(radius=1.2, height=15)
-            sword_handle.apply_translation([0, 0, 7.5])
-            sword_guard = trimesh.creation.box(extents=[12, 3, 2.5])
-            sword_guard.apply_translation([0, 0, 15])
-            sword_blade = trimesh.creation.box(extents=[3, 1.2, 45])
-            sword_blade.apply_translation([0, 0, 37.5])
-            sword = trimesh.util.concatenate([sword_handle, sword_guard, sword_blade])
-            
-            sword.apply_transform(trimesh.transformations.rotation_matrix(np.radians(45), [1, 0, 0]))
-            sword.apply_translation(hand_pos)
-            components.append(sword)
-            
-        if has_shield:
-            shield = trimesh.creation.cylinder(radius=16, height=3)
-            shield.apply_transform(trimesh.transformations.rotation_matrix(np.radians(90), [0, 1, 0]))
-            shield_pos = [-15, 4, 30] if (is_humanoid and is_hero_pose) else [-14, 2, 28]
-            shield.apply_translation(shield_pos)
-            components.append(shield)
-            
-        if has_wings:
-            left_wing = trimesh.creation.box(extents=[38, 2, 18])
-            left_wing.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-25), [0, 1, 0]))
-            left_wing.apply_transform(trimesh.transformations.rotation_matrix(np.radians(20), [0, 0, 1]))
-            left_wing.apply_translation([-22, -10, 35])
-            
-            right_wing = trimesh.creation.box(extents=[38, 2, 18])
-            right_wing.apply_transform(trimesh.transformations.rotation_matrix(np.radians(25), [0, 1, 0]))
-            right_wing.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-20), [0, 0, 1]))
-            right_wing.apply_translation([22, -10, 35])
-            components.extend([left_wing, right_wing])
-            
-        # Fallback to general shape if empty
-        if not components:
-            mesh = trimesh.creation.icosphere(radius=30)
-            for _ in range(2):
-                vertices, faces = trimesh.remesh.subdivide(mesh.vertices, mesh.faces)
-                mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-            mesh.vertices += np.random.normal(0, 1.8, mesh.vertices.shape)
-            return mesh
-            
-        mesh = trimesh.util.concatenate(components)
-        
-        # Smooth the geometry slightly with subdivision mapping
-        try:
-            vertices, faces = trimesh.remesh.subdivide(mesh.vertices, mesh.faces)
-            mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-        except Exception:
-            pass
-            
-        return mesh
+        # Simple compound shape as fallback
+        body = trimesh.creation.icosphere(radius=12)
+        base = trimesh.creation.box(extents=[16, 16, 6])
+        base.apply_translation([0, 0, -12])
+        return trimesh.util.concatenate([body, base])
 
     def generate_3d_from_text(self, prompt):
-        """Handles complex organic generation requests."""
+        """Handles complex organic generation requests using Gemini AI synthesis."""
         self.chat_history.append(f"<b>AI:</b> Initiating Neural Mesh Synthesis for: '{prompt}'...")
         self.speak(f"Analyzing form and structure for {prompt}. Synthesizing complex geometry.")
         
-        # Professional 'Technical' Feedback loop
-        QtCore.QTimer.singleShot(1500, lambda: self.chat_history.append("<b>AI:</b> Voxelizing text-to-space description..."))
-        QtCore.QTimer.singleShot(3000, lambda: self.chat_history.append("<b>AI:</b> Refining Signed Distance Fields (SDF)..."))
-        QtCore.QTimer.singleShot(4500, lambda: self.chat_history.append("<b>AI:</b> Extracting Marching Cubes manifold..."))
-        
-        def finalize_gen():
-            mesh = self.generate_complex_procedural_mesh(prompt)
-            
-            # Snap bottom to Z=0
+        # Start background thread for synthesis
+        self.synthesis_thread = GeminiSynthesisThread(prompt, parent=self)
+        self.synthesis_thread.start()
+
+    def _handle_synthesis_success(self, prompt, mesh, code):
+        try:
             mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
-            
-            name = f"AI_Generated_{len(self.meshes)}"
+        except Exception:
+            pass
+        
+        name = f"AI_Generated_{len(self.meshes)}"
+        self.meshes[name] = mesh
+        self.selected_mesh_name = name
+        self.update_canvas()
+        self.chat_history.append(f"<b>System:</b> Model '{prompt}' successfully synthesized using Gemini AI.")
+        self.speak("Geometry synthesized successfully.")
+        
+        # Enable the save macro button and store the code in last_executed_code
+        self.last_executed_code = code
+        self.save_macro_btn.setEnabled(True)
+
+    def _handle_synthesis_error(self, prompt, err_msg, code):
+        self.chat_history.append(f"<b>System:</b> Synthesis failed: {err_msg}")
+        self.speak("Failed to synthesize geometry.")
+
+    def _log_ai_chat(self, msg):
+        self.chat_history.append(msg)
+
+    def _handle_offline_fallback(self, prompt):
+        self.chat_history.append("<b>System:</b> Gemini API Key missing or offline. Contacting Offline Procedural Engine...")
+        self.speak("Falling back to local templates.")
+        try:
+            mesh = self.generate_complex_procedural_mesh(prompt)
+            mesh.apply_translation([0, 0, -mesh.bounds[0][2]])
+            name = f"Offline_Generated_{len(self.meshes)}"
             self.meshes[name] = mesh
             self.selected_mesh_name = name
             self.update_canvas()
-            self.chat_history.append(f"<b>System:</b> Complex model '{prompt}' synthesized and added to scene.")
-            self.speak("Geometry synthesized successfully.")
-
-        QtCore.QTimer.singleShot(6000, finalize_gen)
+            self.chat_history.append(f"<b>System:</b> Local model for '{prompt}' generated as fallback.")
+        except Exception as e:
+            self.chat_history.append(f"<b>System:</b> Fallback failed: {e}")
 
     def toggle_voice(self):
         """Enables microphone listening."""
