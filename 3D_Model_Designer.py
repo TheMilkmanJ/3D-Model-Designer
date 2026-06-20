@@ -388,6 +388,12 @@ class AI3DModeler(QtWidgets.QMainWindow):
         self.plotter.iren.add_observer("MouseMoveEvent", self._on_drag_move)
         self.plotter.iren.add_observer("LeftButtonReleaseEvent", self._on_drag_end)
 
+        # NEW: Direct Rotate Support via Shift + Right Click
+        self.is_rotating = False
+        self.rotate_start_pos = None
+        self.plotter.iren.add_observer("RightButtonPressEvent", self._on_rotate_start)
+        self.plotter.iren.add_observer("RightButtonReleaseEvent", self._on_rotate_end)
+
         # 2. Scene Management, Creative Mode & Art Palette (Right Sidebar using Tabs)
         self.sidebar_tabs = QtWidgets.QTabWidget()
         self.main_h_layout.addWidget(self.sidebar_tabs, stretch=1)
@@ -1782,8 +1788,28 @@ class AI3DModeler(QtWidgets.QMainWindow):
                     obj.AbortFlagOn()
                     return
 
+    def _on_rotate_start(self, obj, event):
+        """Starts a rotation operation if Shift is held and a mesh is right-clicked."""
+        if not self.plotter.iren.GetShiftKey():
+            return
+            
+        pos = self.plotter.iren.GetEventPosition()
+        picker = pv.vtk.vtkPropPicker()
+        picker.Pick(pos[0], pos[1], 0, self.plotter.renderer)
+        actor = picker.GetActor()
+        
+        if actor:
+            for name, m in self.meshes.items():
+                if self.plotter.renderer.actors.get(name) == actor:
+                    self.selected_mesh_name = name
+                    self.save_state()
+                    self.is_rotating = True
+                    self.rotate_start_pos = pos
+                    obj.AbortFlagOn()
+                    return
+
     def _on_drag_move(self, obj, event):
-        """Translates the mesh on the XY plane during dragging."""
+        """Translates or rotates the mesh depending on the drag/rotate state."""
         if self.is_dragging and self.selected_mesh_name:
             pos = self.plotter.iren.GetEventPosition()
             current_world = self.get_mouse_xy_projection(pos)
@@ -1800,12 +1826,44 @@ class AI3DModeler(QtWidgets.QMainWindow):
                 self.drag_start_world = self.drag_start_world + delta
                 self.update_canvas()
             obj.AbortFlagOn()
+            
+        elif self.is_rotating and self.selected_mesh_name:
+            pos = self.plotter.iren.GetEventPosition()
+            dx = pos[0] - self.rotate_start_pos[0]
+            angle_deg = dx * 0.5
+            
+            if self.snap_to_grid:
+                angle_deg = np.round(angle_deg / 5.0) * 5.0
+                
+            if abs(angle_deg) > 0.01:
+                angle_rad = np.radians(angle_deg)
+                mesh = self.meshes[self.selected_mesh_name]
+                centroid = mesh.centroid.copy()
+                mesh.apply_translation(-centroid)
+                rot_mat = trimesh.transformations.rotation_matrix(angle_rad, [0, 0, 1])
+                mesh.apply_transform(rot_mat)
+                mesh.apply_translation(centroid)
+                
+                self.rotate_start_pos = pos
+                self.update_canvas()
+            obj.AbortFlagOn()
 
     def _on_drag_end(self, obj, event):
         """Stops the drag operation."""
         if self.is_dragging:
             self.is_dragging = False
             self.chat_history.append(f"<b>System:</b> Shift-Drag completed for '{self.selected_mesh_name}'.")
+            
+        if hasattr(self, 'box_widget_act') and self.box_widget_act.isChecked() and self.selected_mesh_name:
+            self.widget_start_mesh = self.meshes[self.selected_mesh_name].copy()
+            self.widget_bound_mesh_name = None
+            self.refresh_widgets()
+
+    def _on_rotate_end(self, obj, event):
+        """Stops the rotate operation."""
+        if self.is_rotating:
+            self.is_rotating = False
+            self.chat_history.append(f"<b>System:</b> Shift-Right-Click Rotation completed for '{self.selected_mesh_name}'.")
             
         if hasattr(self, 'box_widget_act') and self.box_widget_act.isChecked() and self.selected_mesh_name:
             self.widget_start_mesh = self.meshes[self.selected_mesh_name].copy()
