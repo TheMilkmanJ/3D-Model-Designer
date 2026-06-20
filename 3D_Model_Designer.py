@@ -1327,7 +1327,7 @@ class AI3DModeler(QtWidgets.QMainWindow):
         shapes_btn = QtWidgets.QToolButton(); shapes_btn.setText("🧊 Create")
         shapes_btn.setPopupMode(QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup)
         shapes_menu = QtWidgets.QMenu()
-        for s in ["Cube", "Sphere", "Cylinder", "Cone", "Pyramid", "Torus", "Capsule", "Annulus", "Helix", "Torus Knot", "Star", "Heart", "Hex Prism", "Oct Prism", "Bolt", "Nut", "Sketch Mode"]:
+        for s in ["Cube", "Sphere", "Cylinder", "Cone", "Pyramid", "Torus", "Capsule", "Annulus", "Helix", "Torus Knot", "Star", "Heart", "Hex Prism", "Oct Prism", "Pentagon Prism", "Superellipsoid", "Trefoil Knot", "Saddle Surface", "Sketch Mode"]:
             shapes_menu.addAction(s).triggered.connect(lambda chk, val=s: self.add_primitive(val))
         
         shapes_menu.addSeparator()
@@ -1337,6 +1337,8 @@ class AI3DModeler(QtWidgets.QMainWindow):
         math_menu.addAction("Gyroid Infill").triggered.connect(lambda: self.add_math_shape("gyroid"))
         math_menu.addAction("Chaos Attractor Ribbon").triggered.connect(lambda: self.add_math_shape("lorenz"))
         math_menu.addAction("Sierpinski Fractal Pyramid").triggered.connect(lambda: self.add_math_shape("sierpinski"))
+        math_menu.addAction("DNA Double Helix").triggered.connect(lambda: self.add_math_shape("dna"))
+        math_menu.addAction("Wave Ripple Surface").triggered.connect(lambda: self.add_math_shape("wave"))
         
         shapes_menu.addSeparator()
         shapes_menu.addAction("🖼 Image-to-3D (AI)").triggered.connect(self.import_photos_to_3d)
@@ -2684,6 +2686,14 @@ class AI3DModeler(QtWidgets.QMainWindow):
             mesh = trimesh.creation.cylinder(radius=20, height=40, sections=6)
         elif shape_type == "Oct Prism":
             mesh = trimesh.creation.cylinder(radius=20, height=40, sections=8)
+        elif shape_type == "Pentagon Prism":
+            mesh = trimesh.creation.cylinder(radius=20, height=40, sections=5)
+        elif shape_type == "Superellipsoid":
+            mesh = self.generate_procedural_superellipsoid()
+        elif shape_type == "Trefoil Knot":
+            mesh = self.generate_procedural_trefoil_knot()
+        elif shape_type == "Saddle Surface":
+            mesh = self.generate_procedural_saddle()
         elif shape_type == "Bolt":
             self.create_bolt(8); return
         elif shape_type == "Nut":
@@ -3168,11 +3178,36 @@ class AI3DModeler(QtWidgets.QMainWindow):
         self.process_basic_command(command)
 
     def generate_complex_procedural_mesh(self, prompt):
-        """Simple clean fallback to generate primitive shapes when offline."""
-        import trimesh
-        import numpy as np
+        """Intelligent offline fallback that parses keywords to generate procedural meshes."""
+        import offline_ai
+        cmd = prompt.lower()
+        if "chair" in cmd:
+            return offline_ai.generate_procedural_chair(self)
+        elif "table" in cmd or "desk" in cmd:
+            return offline_ai.generate_procedural_table(self)
+        elif "stair" in cmd:
+            return offline_ai.generate_procedural_staircase(self)
+        elif "house" in cmd or "cabin" in cmd:
+            return offline_ai.generate_procedural_house(self)
+        elif "gear" in cmd:
+            return offline_ai.generate_procedural_gear(self)
+        elif "mug" in cmd or "cup" in cmd:
+            return offline_ai.generate_procedural_mug(self)
+        elif "vase" in cmd:
+            return offline_ai.generate_procedural_vase(self)
+        elif "helix" in cmd or "spring" in cmd:
+            return offline_ai.generate_procedural_helix(self)
+        elif "knot" in cmd:
+            return offline_ai.generate_procedural_torus_knot(self)
+        elif "star" in cmd:
+            return offline_ai.generate_procedural_star(self)
+        elif "heart" in cmd:
+            return offline_ai.generate_procedural_heart(self)
+        elif any(kw in cmd for kw in ["person", "human", "character", "humanoid", "wolf", "robot", "spider man", "reaper"]):
+            return offline_ai.generate_procedural_character(self, prompt)
         
-        # Simple compound shape as fallback
+        # Standard default shape fallback
+        import trimesh
         body = trimesh.creation.icosphere(radius=12)
         base = trimesh.creation.box(extents=[16, 16, 6])
         base.apply_translation([0, 0, -12])
@@ -3871,6 +3906,18 @@ class AI3DModeler(QtWidgets.QMainWindow):
     def generate_procedural_heart(self, *args, **kwargs):
         import offline_ai
         return offline_ai.generate_procedural_heart(self, *args, **kwargs)
+
+    def generate_procedural_superellipsoid(self, *args, **kwargs):
+        import offline_ai
+        return offline_ai.generate_procedural_superellipsoid(self, *args, **kwargs)
+
+    def generate_procedural_trefoil_knot(self, *args, **kwargs):
+        import offline_ai
+        return offline_ai.generate_procedural_trefoil_knot(self, *args, **kwargs)
+
+    def generate_procedural_saddle(self, *args, **kwargs):
+        import offline_ai
+        return offline_ai.generate_procedural_saddle(self, *args, **kwargs)
 
 if __name__ == "__main__":
     # Create the Qt Application immediately so we can show the splash screen

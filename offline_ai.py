@@ -928,6 +928,8 @@ def get_shape_base_mesh(self, shape_type):
         return generate_procedural_trefoil_knot(self)
     elif shape_type == "Saddle Surface":
         return generate_procedural_saddle(self)
+    elif shape_type == "Wedge":
+        return generate_procedural_wedge(self)
     return None
 
 def apply_embedded_aesthetics(self, command):
@@ -1530,4 +1532,26 @@ def generate_procedural_superellipsoid(self, size=20, n1=0.5, n2=1.5, res=30):
     mesh = trimesh.Trimesh(vertices=np.array(vertices), faces=np.array(faces))
     mesh.merge_vertices()
     mesh.remove_degenerate_faces()
+    return mesh
+
+def generate_procedural_wedge(self, w=40, d=40, h=40):
+    """Procedurally generates a right-triangular wedge prism mesh."""
+    vertices = np.array([
+        [0, 0, 0],
+        [w, 0, 0],
+        [0, d, 0],
+        [w, d, 0],
+        [0, 0, h],
+        [0, d, h]
+    ])
+    faces = np.array([
+        [0, 2, 1], [1, 2, 3],
+        [0, 1, 4], [1, 5, 4],
+        [0, 4, 1],
+        [2, 3, 5],
+        [0, 2, 4], [2, 5, 4],
+        [1, 3, 4], [3, 5, 4]
+    ])
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+    mesh.fix_normals()
     return mesh
