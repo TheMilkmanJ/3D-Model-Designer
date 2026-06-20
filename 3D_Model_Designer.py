@@ -3048,6 +3048,275 @@ class AI3DModeler(QtWidgets.QMainWindow):
         hood.apply_translation([0, 0, 52])
         return trimesh.util.concatenate([body, hood])
 
+    def generate_complex_procedural_mesh(self, prompt):
+        """Dynamic anatomy and accessory synthesizer to generate complex organic shapes based on prompt keywords."""
+        import trimesh
+        import numpy as np
+        
+        p_lower = prompt.lower()
+        components = []
+        
+        # 1. Subject extraction
+        is_spider = "spider" in p_lower and not ("spider-man" in p_lower or "spiderman" in p_lower)
+        is_insect = any(w in p_lower for w in ["insect", "bug", "ant", "beetle", "scorpion"])
+        is_quadruped = any(w in p_lower for w in ["wolf", "dog", "quadruped", "lion", "cat", "horse", "dragon", "beast", "creature"]) and not is_spider and not is_insect
+        is_humanoid = any(w in p_lower for w in ["human", "man", "humanoid", "robot", "reaper", "reapers", "cloak", "spiderman", "spider-man", "hero", "pose", "character", "knight", "soldier", "warrior", "suit", "armor"]) or not (is_spider or is_insect or is_quadruped)
+        
+        # Pose detection
+        is_hero_pose = any(w in p_lower for w in ["hero", "pose", "crouch", "dynamic", "action", "attacking", "fight", "spiderman", "spider-man"])
+        is_flying = any(w in p_lower for w in ["fly", "flying", "jump", "wings"])
+        
+        # Details & Themes
+        has_wolf_head = "wolf" in p_lower
+        has_robot_head = any(w in p_lower for w in ["robot", "cyborg", "cyber", "mech", "machine"])
+        has_cloak = any(w in p_lower for w in ["cloak", "robe", "hood", "reaper", "goth", "spooky"])
+        
+        # Weapons & Attachments
+        has_scythe = "scythe" in p_lower
+        has_sword = any(w in p_lower for w in ["sword", "blade", "weapon", "dagger", "saber"])
+        has_shield = "shield" in p_lower
+        has_wings = any(w in p_lower for w in ["wings", "wing", "angel", "demon", "fly"])
+        
+        # Torso and core layout
+        if is_humanoid:
+            # Torso / Upper body
+            if has_cloak:
+                # Large draped robe-like body
+                torso = trimesh.creation.cylinder(radius=15, height=50)
+                torso.apply_translation([0, 0, 25])
+                components.append(torso)
+            else:
+                # Styled humanoid chest and hip section
+                chest = trimesh.creation.icosphere(radius=12)
+                chest.apply_transform(np.diag([1.25, 0.85, 1.0, 1.0])) # wider chest
+                chest.apply_translation([0, 0, 35])
+                hips = trimesh.creation.cylinder(radius=8, height=12)
+                hips.apply_translation([0, 0, 20])
+                components.extend([chest, hips])
+                
+            # Head / Hood
+            if has_cloak:
+                hood = trimesh.creation.icosphere(radius=12)
+                hood.apply_translation([0, 0, 52])
+                components.append(hood)
+            else:
+                head = trimesh.creation.icosphere(radius=8)
+                head.apply_translation([0, 0, 48])
+                components.append(head)
+                
+            # Snout / Ears / Visors
+            if has_wolf_head:
+                snout = trimesh.creation.box(extents=[8, 14, 8])
+                snout.apply_translation([0, 8, 52] if has_cloak else [0, 8, 48])
+                left_ear = trimesh.creation.cone(radius=3, height=8)
+                left_ear.apply_translation([-5, 0, 60] if has_cloak else [-4, 0, 54])
+                right_ear = trimesh.creation.cone(radius=3, height=8)
+                right_ear.apply_translation([5, 0, 60] if has_cloak else [4, 0, 54])
+                components.extend([snout, left_ear, right_ear])
+            elif has_robot_head:
+                visor = trimesh.creation.box(extents=[10, 4, 3])
+                visor.apply_translation([0, 6, 48])
+                antenna = trimesh.creation.cylinder(radius=0.8, height=8)
+                antenna.apply_translation([0, 0, 54])
+                components.extend([visor, antenna])
+                
+            # Limbs (Legs & Arms)
+            if is_hero_pose:
+                # Crouching legs (dynamic hero pose)
+                left_thigh = trimesh.creation.cylinder(radius=3.5, height=18)
+                left_thigh.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-60), [1, 0, 0]))
+                left_thigh.apply_translation([-10, -6, 12])
+                
+                left_shin = trimesh.creation.cylinder(radius=2.8, height=18)
+                left_shin.apply_transform(trimesh.transformations.rotation_matrix(np.radians(60), [1, 0, 0]))
+                left_shin.apply_translation([-10, 4, 6])
+                
+                right_thigh = trimesh.creation.cylinder(radius=3.5, height=18)
+                right_thigh.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [0, 1, 0]))
+                right_thigh.apply_translation([8, 0, 12])
+                
+                right_shin = trimesh.creation.cylinder(radius=2.8, height=18)
+                right_shin.apply_translation([14, 0, 6])
+                
+                components.extend([left_thigh, left_shin, right_thigh, right_shin])
+                
+                # Dynamic action arms
+                left_arm = trimesh.creation.cylinder(radius=3, height=22)
+                left_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-30), [1, 0, 0]))
+                left_arm.apply_translation([-15, 4, 30])
+                
+                right_arm = trimesh.creation.cylinder(radius=3, height=22)
+                right_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(70), [1, 0, 0]))
+                right_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-30), [0, 0, 1]))
+                right_arm.apply_translation([15, 10, 36])
+                
+                components.extend([left_arm, right_arm])
+            else:
+                # Standard standing legs
+                if not has_cloak:
+                    left_leg = trimesh.creation.cylinder(radius=3.5, height=22)
+                    left_leg.apply_translation([-7, 0, 11])
+                    right_leg = trimesh.creation.cylinder(radius=3.5, height=22)
+                    right_leg.apply_translation([7, 0, 11])
+                    components.extend([left_leg, right_leg])
+                    
+                # Arms
+                left_arm = trimesh.creation.cylinder(radius=3, height=22)
+                left_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-15), [0, 1, 0]))
+                left_arm.apply_translation([-14, 0, 32])
+                
+                right_arm = trimesh.creation.cylinder(radius=3, height=22)
+                right_arm.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [0, 1, 0]))
+                right_arm.apply_translation([14, 0, 32])
+                components.extend([left_arm, right_arm])
+                
+        elif is_quadruped:
+            # Horizontal quadruped body
+            body = trimesh.creation.cylinder(radius=10, height=45)
+            body.apply_transform(trimesh.transformations.rotation_matrix(np.radians(90), [1, 0, 0]))
+            body.apply_translation([0, 0, 22])
+            components.append(body)
+            
+            # Neck and Head
+            neck = trimesh.creation.cylinder(radius=5, height=18)
+            neck.apply_transform(trimesh.transformations.rotation_matrix(np.radians(35), [1, 0, 0]))
+            neck.apply_translation([0, 18, 28])
+            head = trimesh.creation.icosphere(radius=8)
+            head.apply_translation([0, 24, 38])
+            components.extend([neck, head])
+            
+            # Wolf snout & ears
+            if has_wolf_head or "dog" in p_lower or "quadruped" in p_lower:
+                snout = trimesh.creation.box(extents=[5, 10, 5])
+                snout.apply_translation([0, 31, 38])
+                left_ear = trimesh.creation.cone(radius=2, height=6)
+                left_ear.apply_translation([-3, 22, 45])
+                right_ear = trimesh.creation.cone(radius=2, height=6)
+                right_ear.apply_translation([3, 22, 45])
+                components.extend([snout, left_ear, right_ear])
+            elif "dragon" in p_lower:
+                left_horn = trimesh.creation.cone(radius=1.8, height=12)
+                left_horn.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
+                left_horn.apply_translation([-4, 18, 46])
+                right_horn = trimesh.creation.cone(radius=1.8, height=12)
+                right_horn.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
+                right_horn.apply_translation([4, 18, 46])
+                components.extend([left_horn, right_horn])
+                
+            # 4 Legs
+            leg_h = 18
+            leg_r = 2.5
+            fl = trimesh.creation.cylinder(radius=leg_r, height=leg_h)
+            fl.apply_translation([-8, 16, 9])
+            fr = trimesh.creation.cylinder(radius=leg_r, height=leg_h)
+            fr.apply_translation([8, 16, 9])
+            bl = trimesh.creation.cylinder(radius=leg_r, height=leg_h)
+            bl.apply_translation([-8, -16, 9])
+            br = trimesh.creation.cylinder(radius=leg_r, height=leg_h)
+            br.apply_translation([8, -16, 9])
+            components.extend([fl, fr, bl, br])
+            
+            # Tail
+            tail = trimesh.creation.cylinder(radius=1.8, height=20)
+            tail.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [1, 0, 0]))
+            tail.apply_translation([0, -28, 18])
+            components.append(tail)
+            
+        elif is_spider or is_insect:
+            # Segmented body segments
+            head = trimesh.creation.icosphere(radius=8)
+            head.apply_translation([0, 16, 12])
+            thorax = trimesh.creation.icosphere(radius=10)
+            thorax.apply_translation([0, 2, 10])
+            abdomen = trimesh.creation.icosphere(radius=14)
+            abdomen.apply_transform(np.diag([1.0, 1.4, 1.0, 1.0]))
+            abdomen.apply_translation([0, -16, 12])
+            components.extend([head, thorax, abdomen])
+            
+            # Legs (8 for spider, 6 for insect)
+            leg_count = 8 if is_spider else 6
+            for i in range(leg_count):
+                side = 1 if (i % 2 == 0) else -1
+                pair_idx = i // 2
+                
+                angle_y = np.radians(side * (45 - pair_idx * 25))
+                leg_joint = trimesh.creation.cylinder(radius=1.5, height=18)
+                leg_joint.apply_transform(trimesh.transformations.rotation_matrix(np.radians(60), [0, 1, 0]))
+                leg_joint.apply_transform(trimesh.transformations.rotation_matrix(angle_y, [0, 0, 1]))
+                leg_joint.apply_translation([side * 8, (pair_idx - 1.5) * 8, 14])
+                
+                leg_tip = trimesh.creation.cylinder(radius=1.0, height=22)
+                leg_tip.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-45), [0, 1, 0]))
+                leg_tip.apply_transform(trimesh.transformations.rotation_matrix(angle_y, [0, 0, 1]))
+                leg_tip.apply_translation([side * 18, (pair_idx - 1.5) * 8, 4])
+                
+                components.extend([leg_joint, leg_tip])
+                
+        # 3. Weapons & Shields placement
+        hand_pos = [15, 12, 36] if (is_humanoid and is_hero_pose) else [14, 0, 24]
+        
+        if has_scythe:
+            scythe_handle = trimesh.creation.cylinder(radius=1.5, height=80)
+            scythe_handle.apply_translation(hand_pos)
+            
+            scythe_blade = trimesh.creation.box(extents=[35, 3, 6])
+            scythe_blade.apply_translation([-10, 0, 0])
+            scythe_blade.apply_transform(trimesh.transformations.rotation_matrix(np.radians(15), [0, 1, 0]))
+            scythe_blade.apply_translation([hand_pos[0], hand_pos[1], hand_pos[2] + 40])
+            components.extend([scythe_handle, scythe_blade])
+            
+        elif has_sword:
+            sword_handle = trimesh.creation.cylinder(radius=1.2, height=15)
+            sword_handle.apply_translation([0, 0, 7.5])
+            sword_guard = trimesh.creation.box(extents=[12, 3, 2.5])
+            sword_guard.apply_translation([0, 0, 15])
+            sword_blade = trimesh.creation.box(extents=[3, 1.2, 45])
+            sword_blade.apply_translation([0, 0, 37.5])
+            sword = trimesh.util.concatenate([sword_handle, sword_guard, sword_blade])
+            
+            sword.apply_transform(trimesh.transformations.rotation_matrix(np.radians(45), [1, 0, 0]))
+            sword.apply_translation(hand_pos)
+            components.append(sword)
+            
+        if has_shield:
+            shield = trimesh.creation.cylinder(radius=16, height=3)
+            shield.apply_transform(trimesh.transformations.rotation_matrix(np.radians(90), [0, 1, 0]))
+            shield_pos = [-15, 4, 30] if (is_humanoid and is_hero_pose) else [-14, 2, 28]
+            shield.apply_translation(shield_pos)
+            components.append(shield)
+            
+        if has_wings:
+            left_wing = trimesh.creation.box(extents=[38, 2, 18])
+            left_wing.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-25), [0, 1, 0]))
+            left_wing.apply_transform(trimesh.transformations.rotation_matrix(np.radians(20), [0, 0, 1]))
+            left_wing.apply_translation([-22, -10, 35])
+            
+            right_wing = trimesh.creation.box(extents=[38, 2, 18])
+            right_wing.apply_transform(trimesh.transformations.rotation_matrix(np.radians(25), [0, 1, 0]))
+            right_wing.apply_transform(trimesh.transformations.rotation_matrix(np.radians(-20), [0, 0, 1]))
+            right_wing.apply_translation([22, -10, 35])
+            components.extend([left_wing, right_wing])
+            
+        # Fallback to general shape if empty
+        if not components:
+            mesh = trimesh.creation.icosphere(radius=30)
+            for _ in range(2):
+                vertices, faces = trimesh.remesh.subdivide(mesh.vertices, mesh.faces)
+                mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+            mesh.vertices += np.random.normal(0, 1.8, mesh.vertices.shape)
+            return mesh
+            
+        mesh = trimesh.util.concatenate(components)
+        
+        # Smooth the geometry slightly with subdivision mapping
+        try:
+            vertices, faces = trimesh.remesh.subdivide(mesh.vertices, mesh.faces)
+            mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+        except Exception:
+            pass
+            
+        return mesh
+
     def generate_3d_from_text(self, prompt):
         """Handles complex organic generation requests."""
         self.chat_history.append(f"<b>AI:</b> Initiating Neural Mesh Synthesis for: '{prompt}'...")
@@ -3059,23 +3328,7 @@ class AI3DModeler(QtWidgets.QMainWindow):
         QtCore.QTimer.singleShot(4500, lambda: self.chat_history.append("<b>AI:</b> Extracting Marching Cubes manifold..."))
         
         def finalize_gen():
-            p_lower = prompt.lower()
-            # Dynamic prompt detection
-            if "wolf" in p_lower and "cloak" in p_lower and "scythe" in p_lower:
-                mesh = self.generate_wolf_reaper_mesh()
-            elif "scythe" in p_lower:
-                mesh = self.generate_scythe_mesh()
-            elif "wolf" in p_lower:
-                mesh = self.generate_wolf_mesh()
-            elif "reaper" in p_lower or "cloak" in p_lower:
-                mesh = self.generate_reaper_mesh()
-            else:
-                # Default organic shape
-                mesh = trimesh.creation.icosphere(radius=30)
-                for _ in range(2):
-                    vertices, faces = trimesh.remesh.subdivide(mesh.vertices, mesh.faces)
-                    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-                mesh.vertices += np.random.normal(0, 1.8, mesh.vertices.shape)
+            mesh = self.generate_complex_procedural_mesh(prompt)
             
             # Snap bottom to Z=0
             mesh.apply_translation([0, 0, -mesh.bounds[0][2]])

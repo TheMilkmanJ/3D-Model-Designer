@@ -650,6 +650,11 @@ def process_basic_command(self, command):
         self.update_canvas()
         self.speak("Geometry updated offline.")
 
+    # Default fallback: Treat unrecognized descriptive commands or commands with creation keywords as text-to-3D prompts
+    if len(command.split()) >= 3 or any(verb in command for verb in ["make", "create", "generate", "build", "synthesize", "design", "draw", "render", "pose"]):
+        self.generate_3d_from_text(command)
+        return
+
 def add_math_shape(self, shape_type):
     """Generates mathematical art models and updates the active scene."""
     self.save_state()
