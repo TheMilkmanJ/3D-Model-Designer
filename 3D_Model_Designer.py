@@ -3945,6 +3945,13 @@ if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
     
+    # Close PyInstaller bootloader splash screen if running as compiled executable
+    try:
+        import pyi_splash
+        pyi_splash.close()
+    except ImportError:
+        pass
+    
     # 1. Instantly display the Cyberpunk splash screen with a loading progress bar
     splash = BeautifulSplashScreen()
     splash.show()
